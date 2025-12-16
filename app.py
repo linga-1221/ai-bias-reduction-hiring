@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flask app with separated templates and static files"""
+"""Flask app with multiple resume upload support"""
 
 from flask import Flask, request, jsonify, render_template
 import os
@@ -7,6 +7,8 @@ import re
 import PyPDF2
 from collections import defaultdict
 import time
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 app = Flask(__name__)
 
@@ -15,7 +17,7 @@ UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max for multiple files
 
 # Job roles with detailed descriptions and required skills
 job_roles = {
@@ -91,30 +93,24 @@ BIAS_KEYWORDS = {
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
     try:
-        print(f"Attempting to extract text from: {file_path}")
         with open(file_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
             text = ""
-            print(f"PDF has {len(reader.pages)} pages")
             
-            for i, page in enumerate(reader.pages):
+            for page in reader.pages:
                 try:
                     page_text = page.extract_text()
                     if page_text:
                         text += page_text + "\n"
-                        print(f"Extracted {len(page_text)} characters from page {i+1}")
-                except Exception as e:
-                    print(f"Error extracting page {i+1}: {str(e)}")
+                except Exception:
                     continue
             
             if not text.strip():
-                return "Error: Could not extract text from PDF. The PDF might be image-based or encrypted."
+                return "Error: Could not extract text from PDF."
             
-            print(f"Total extracted text length: {len(text)}")
             return text
             
     except Exception as e:
-        print(f"PDF extraction error: {str(e)}")
         return f"Error extracting PDF: {str(e)}"
 
 def anonymize_resume(text):
@@ -177,57 +173,106 @@ def calculate_job_match(resume_skills, job_skills):
         "missing_skills": list(set(job_skills) - set(resume_skills))
     }
 
-def generate_confusion_matrix():
-    """Generate confusion matrix data for bias detection"""
-    test_data = [
-        ("We need a strong, aggressive programmer who is a rockstar at coding", True),
-        ("Looking for a young, energetic developer with fresh ideas", True),
-        ("Seeking a competitive ninja who can dominate the market", True),
-        ("We want a guru in machine learning with assertive leadership", True),
-        ("Need an experienced, mature developer for senior role", True),
-        ("We need a skilled programmer with problem-solving abilities", False),
-        ("Looking for a qualified developer with technical expertise", False),
-        ("Seeking a proficient candidate with relevant experience", False),
-        ("We want a talented professional with good communication skills", False),
-        ("Need a dedicated developer for software development role", False),
-        ("Experienced professional with strong technical skills", True),
-        ("Collaborative team player with good communication", False),
-        ("Seasoned developer with mature approach to problems", True),
-        ("Qualified candidate with proven track record", False),
-        ("Energetic team member with fresh perspectives", True),
-    ]
-    
-    true_positive = 0
-    true_negative = 0
-    false_positive = 0
-    false_negative = 0
-    results = []
-    
-    for description, true_label in test_data:
-        predicted_bias = len(analyze_job_description_bias(description)) > 0
+def process_single_resume(file_path, filename, job_data):
+    """Process a single resume file"""
+    try:
         
-        if predicted_bias and true_label:
-            true_positive += 1
-            status = "correct"
-        elif not predicted_bias and not true_label:
-            true_negative += 1
-            status = "correct"
-        elif predicted_bias and not true_label:
-            false_positive += 1
-            status = "incorrect"
+        # Extract and process
+        resume_text = extract_text_from_pdf(file_path)
+        
+        if "Error" in resume_text:
+            os.remove(file_path)
+            return {
+                'filename': filename,
+                'error': resume_text,
+                'status': 'failed'
+            }
+        
+        # Process resume
+        anonymized_resume = anonymize_resume(resume_text)
+        resume_skills = extract_skills_from_text(resume_text)
+        match_result = calculate_job_match(resume_skills, job_data['required_skills'])
+        
+        # Generate recommendation
+        match_percentage = match_result['match_percentage']
+        if match_percentage >= 70:
+            recommendation = "Excellent match!"
+        elif match_percentage >= 40:
+            recommendation = "Good match with some gaps."
         else:
-            false_negative += 1
-            status = "incorrect"
+            recommendation = "Limited match."
         
-        results.append({
-            'description': description,
-            'predicted': 'Biased' if predicted_bias else 'Clean',
-            'actual': 'Biased' if true_label else 'Clean',
-            'status': status
-        })
+        # Cleanup
+        try:
+            os.remove(file_path)
+        except:
+            pass
+        
+        return {
+            'filename': filename,
+            'status': 'success',
+            'match_percentage': match_percentage,
+            'matching_skills': match_result['matching_skills'],
+            'missing_skills': match_result['missing_skills'],
+            'recommendation': recommendation,
+            'anonymized_resume': anonymized_resume[:500] + '...' if len(anonymized_resume) > 500 else anonymized_resume
+        }
+        
+    except Exception as e:
+        return {
+            'filename': filename,
+            'error': str(e),
+            'status': 'failed'
+        }
+
+def get_bias_improvement_suggestions(bias_report):
+    """Get specific suggestions for bias improvement"""
+    suggestions = []
     
-    total = len(test_data)
-    accuracy = (true_positive + true_negative) / total
+    for category, words in bias_report.items():
+        if words:
+            if category == 'gender':
+                suggestions.append({
+                    'type': 'Gender Bias',
+                    'words': words,
+                    'suggestion': 'Use gender-neutral terms like "team member" instead of "guys"'
+                })
+            elif category == 'age':
+                suggestions.append({
+                    'type': 'Age Bias', 
+                    'words': words,
+                    'suggestion': 'Focus on skills rather than experience level or energy'
+                })
+            elif category == 'personality':
+                suggestions.append({
+                    'type': 'Personality Bias',
+                    'words': words, 
+                    'suggestion': 'Use professional terms instead of casual descriptors'
+                })
+    
+    return suggestions
+
+# Confusion matrix storage
+confusion_data = {
+    'predictions': []
+}
+
+def generate_confusion_matrix():
+    """Generate confusion matrix from actual predictions"""
+    if not confusion_data['predictions']:
+        return {
+            'matrix': {'true_positive': 0, 'true_negative': 0, 'false_positive': 0, 'false_negative': 0},
+            'metrics': {'accuracy': 0, 'precision': 0, 'recall': 0, 'f1_score': 0},
+            'results': []
+        }
+    
+    true_positive = sum(1 for p in confusion_data['predictions'] if p['predicted'] and p['actual'])
+    true_negative = sum(1 for p in confusion_data['predictions'] if not p['predicted'] and not p['actual'])
+    false_positive = sum(1 for p in confusion_data['predictions'] if p['predicted'] and not p['actual'])
+    false_negative = sum(1 for p in confusion_data['predictions'] if not p['predicted'] and p['actual'])
+    
+    total = len(confusion_data['predictions'])
+    accuracy = (true_positive + true_negative) / total if total > 0 else 0
     precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
     recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
@@ -245,7 +290,12 @@ def generate_confusion_matrix():
             'recall': round(recall, 3),
             'f1_score': round(f1_score, 3)
         },
-        'results': results
+        'results': [{
+            'description': p['description'],
+            'predicted': 'Biased' if p['predicted'] else 'Clean',
+            'actual': 'Biased' if p['actual'] else 'Clean',
+            'status': 'correct' if p['predicted'] == p['actual'] else 'incorrect'
+        } for p in confusion_data['predictions']]
     }
 
 @app.route('/')
@@ -258,121 +308,155 @@ def confusion_matrix():
     matrix_data = generate_confusion_matrix()
     return render_template('confusion_matrix.html', matrix_data=matrix_data)
 
+@app.route('/check-bias-realtime', methods=['POST'])
+def check_bias_realtime():
+    """Real-time bias checking API"""
+    data = request.get_json()
+    text = data.get('text', '')
+    
+    bias_report = analyze_job_description_bias(text)
+    bias_words = []
+    bias_detected = False
+    
+    for category, words in bias_report.items():
+        if words:
+            bias_detected = True
+            bias_words.extend(words)
+    
+    return jsonify({
+        'bias_detected': bias_detected,
+        'bias_words': list(set(bias_words)),
+        'bias_score': len(set(bias_words))
+    })
+
+# Global storage for analytics
+analytics_storage = {
+    'total_resumes': 0,
+    'bias_detections': [],
+    'processing_history': []
+}
+
+@app.route('/analytics')
+def analytics_dashboard():
+    """Analytics dashboard with real data"""
+    bias_counts = defaultdict(int)
+    for bias in analytics_storage['bias_detections']:
+        for category in bias:
+            bias_counts[category] += 1
+    
+    analytics_data = {
+        'total_resumes_processed': analytics_storage['total_resumes'],
+        'bias_incidents_detected': len(analytics_storage['bias_detections']),
+        'average_bias_score': round(sum(len(b) for b in analytics_storage['bias_detections']) / len(analytics_storage['bias_detections']), 2) if analytics_storage['bias_detections'] else 0,
+        'top_bias_categories': [{'category': k.title(), 'count': v} for k, v in sorted(bias_counts.items(), key=lambda x: x[1], reverse=True)],
+        'processing_history': analytics_storage['processing_history'][-10:]
+    }
+    return render_template('analytics.html', data=analytics_data)
+
 @app.route('/upload', methods=['POST'])
 def upload_resume():
     try:
-        print("Upload request received")
-        
-        if 'resume' not in request.files:
-            print("No resume file in request")
-            return jsonify({'error': 'No file uploaded'})
-        
-        file = request.files['resume']
         job_role = request.form.get('job_role')
         
-        print(f"File: {file.filename}, Job role: {job_role}")
-        
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'})
-        
-        if not job_role:
-            return jsonify({'error': 'No job role selected'})
-        
-        if not job_role in job_roles:
+        if not job_role or job_role not in job_roles:
             return jsonify({'error': 'Invalid job role selected'})
         
-        if file and file.filename.lower().endswith('.pdf'):
-            # Create uploads directory if it doesn't exist
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            
-            # Save the uploaded file with a safe filename
-            safe_filename = f"resume_{int(time.time())}_{file.filename}"
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
-            
-            print(f"Saving file to: {file_path}")
-            file.save(file_path)
-            
-            # Verify file was saved
-            if not os.path.exists(file_path):
-                return jsonify({'error': 'Failed to save uploaded file'})
-            
-            print(f"File saved successfully, size: {os.path.getsize(file_path)} bytes")
-            
-            # Extract text from PDF
-            resume_text = extract_text_from_pdf(file_path)
-            
-            print(f"Extracted text length: {len(resume_text)}")
-            
-            if "Error extracting PDF" in resume_text or "Error:" in resume_text:
-                # Clean up the file
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
-                return jsonify({'error': resume_text})
-            
-            # Anonymize resume
-            anonymized_resume = anonymize_resume(resume_text)
-            
-            # Get job details
-            job_data = job_roles[job_role]
-            job_description = job_data['description']
-            required_skills = job_data['required_skills']
-            
-            # Extract skills from resume
-            resume_skills = extract_skills_from_text(resume_text)
-            
-            # Calculate job match
-            match_result = calculate_job_match(resume_skills, required_skills)
-            
-            # Analyze job description for bias
-            bias_report = analyze_job_description_bias(job_description)
-            
-            # Format bias details
-            bias_details = []
-            bias_detected = False
-            for category, words in bias_report.items():
-                if words:
-                    bias_detected = True
-                    bias_details.append({
-                        'category': category.title(),
-                        'words': list(set(words))
-                    })
-            
-            # Generate recommendation
-            match_percentage = match_result['match_percentage']
-            if match_percentage >= 70:
-                recommendation = "Excellent match! This candidate meets most job requirements."
-            elif match_percentage >= 40:
-                recommendation = "Good match with some skill gaps that could be addressed through training."
-            else:
-                recommendation = "Limited match. Consider if the candidate has transferable skills or potential for growth."
-            
-            # Clean up the uploaded file after processing
-            try:
-                os.remove(file_path)
-            except:
-                pass
-            
-            print("Analysis completed successfully")
-            
-            return jsonify({
-                'match_percentage': match_percentage,
-                'matching_skills': match_result['matching_skills'],
-                'missing_skills': match_result['missing_skills'],
-                'recommendation': recommendation,
-                'bias_detected': bias_detected,
-                'bias_details': bias_details,
-                'anonymized_resume': anonymized_resume,
-                'job_title': job_data['title']
-            })
+        # Handle multiple files
+        files = request.files.getlist('resume')
         
-        return jsonify({'error': 'Please upload a PDF file'})
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({'error': 'No files selected'})
+        
+        # Filter PDF files
+        pdf_files = [(f, f.filename) for f in files if f.filename.lower().endswith('.pdf')]
+        
+        if not pdf_files:
+            return jsonify({'error': 'Please upload PDF files only'})
+        
+        if len(pdf_files) > 20:
+            return jsonify({'error': 'Maximum 20 files allowed'})
+        
+        # Create uploads directory
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        
+        job_data = job_roles[job_role]
+        
+        # Save all files first
+        saved_files = []
+        for file, filename in pdf_files:
+            safe_filename = f"resume_{int(time.time())}_{len(saved_files)}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+            file.save(file_path)
+            saved_files.append((file_path, filename))
+            time.sleep(0.01)  # Ensure unique timestamps
+        
+        # Process files in parallel
+        results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_single_resume, file_path, filename, job_data) for file_path, filename in saved_files]
+            
+            for future in futures:
+                try:
+                    result = future.result(timeout=30)
+                    results.append(result)
+                except Exception as e:
+                    results.append({
+                        'filename': 'unknown',
+                        'error': str(e),
+                        'status': 'failed'
+                    })
+        
+        # Analyze job description for bias (once)
+        bias_report = analyze_job_description_bias(job_data['description'])
+        bias_details = []
+        bias_detected = False
+        
+        for category, words in bias_report.items():
+            if words:
+                bias_detected = True
+                bias_details.append({
+                    'category': category.title(),
+                    'words': list(set(words))
+                })
+        
+        # Calculate summary statistics
+        successful_results = [r for r in results if r['status'] == 'success']
+        failed_results = [r for r in results if r['status'] == 'failed']
+        
+        summary = {
+            'total_files': len(pdf_files),
+            'successful': len(successful_results),
+            'failed': len(failed_results),
+            'average_match': round(sum(r['match_percentage'] for r in successful_results) / len(successful_results), 2) if successful_results else 0,
+            'top_candidates': sorted(successful_results, key=lambda x: x['match_percentage'], reverse=True)[:5]
+        }
+        
+        # Update analytics
+        analytics_storage['total_resumes'] += len(successful_results)
+        if bias_detected:
+            analytics_storage['bias_detections'].append(list(bias_report.keys()))
+        analytics_storage['processing_history'].append({
+            'job_role': job_data['title'],
+            'count': len(successful_results),
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+        
+        # Update confusion matrix
+        confusion_data['predictions'].append({
+            'description': job_data['description'],
+            'predicted': bias_detected,
+            'actual': bias_detected  # In real scenario, this would be manually labeled
+        })
+        
+        return jsonify({
+            'results': results,
+            'summary': summary,
+            'bias_detected': bias_detected,
+            'bias_details': bias_details,
+            'job_title': job_data['title']
+        })
         
     except Exception as e:
-        print(f"Server error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': f'Server error: {str(e)}'})
 
 if __name__ == '__main__':
