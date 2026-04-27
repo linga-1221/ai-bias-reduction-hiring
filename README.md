@@ -1,130 +1,241 @@
-# 🤖 AI Bias Detection in Hiring
+<div align="center">
 
-An intelligent web application that promotes fair and inclusive hiring by detecting bias in job descriptions and anonymizing resumes for skill-based evaluation.
+# 🤖 AI Bias Reduction in Hiring
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![Flask](https://img.shields.io/badge/Flask-3.1.0-green.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+### Making recruitment fair, transparent, and skill-based — powered by AI
 
-## ✨ Features
+[![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-View_App-6366f1?style=for-the-badge)](https://ai-for-reducing-bias-in-hiring.vercel.app)
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.1.0-000000?style=for-the-badge&logo=flask)](https://flask.palletsprojects.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-- **🔍 Bias Detection**: Identifies gender, age, personality, and ethnicity bias in job descriptions
-- **🔒 Resume Anonymization**: Removes personal identifiers to focus on qualifications
-- **🎯 Skill Matching**: Calculates candidate-job compatibility based on skills
-- **📊 Performance Analytics**: Confusion matrix showing system accuracy
-- **📄 PDF Support**: Processes PDF resume uploads
-- **🌐 Web Interface**: User-friendly Flask web application
+[![NLP](https://img.shields.io/badge/NLP-NLTK-blue?style=flat)](https://nltk.org)
+[![ML](https://img.shields.io/badge/ML-scikit--learn-F7931E?style=flat&logo=scikitlearn)](https://scikit-learn.org)
+[![PDF](https://img.shields.io/badge/PDF-PyMuPDF-red?style=flat)](https://pymupdf.readthedocs.io)
+[![Deploy](https://img.shields.io/badge/Deploy-Vercel-black?style=flat&logo=vercel)](https://vercel.com)
 
-## 🚀 Quick Start
+*Unconscious bias costs companies top talent. This app removes it from the equation.*
 
-### Prerequisites
-- Python 3.9 or higher
-- pip package manager
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/ai-bias-detection-hiring.git
-   cd ai-bias-detection-hiring
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Run the application**
-   ```bash
-   python app.py
-   ```
-
-4. **Open your browser**
-   ```
-   http://127.0.0.1:5003
-   ```
-
-## 🖥️ Usage
-
-1. **Select a job role** from 20+ predefined options
-2. **Upload a PDF resume** using the file picker
-3. **Click "Analyze"** to get comprehensive results:
-   - Job match percentage
-   - Skill analysis (matching/missing)
-   - Bias detection in job description
-   - Anonymized resume output
-4. **View system performance** via the confusion matrix page
-
-## 🛠️ Tech Stack
-
-- **Backend**: Python, Flask
-- **AI/ML**: NLTK, scikit-learn, PyPDF2
-- **Frontend**: HTML5, CSS3, JavaScript
-- **Data Processing**: Pandas, NumPy
-- **PDF Processing**: PyPDF2, PyMuPDF
-
-## 📁 Project Structure
-
-```
-ai-bias-detection-hiring/
-├── app.py                    # Main Flask application
-├── templates/                # HTML templates
-│   ├── index.html           # Main page
-│   └── confusion_matrix.html # Performance analytics
-├── static/                   # Static assets
-│   ├── css/                 # Stylesheets
-│   └── js/                  # JavaScript files
-├── sample_pdfs/             # Sample resume files
-├── uploads/                 # Temporary upload directory
-├── requirements.txt         # Python dependencies
-└── README.md               # Project documentation
-```
-
-## 📈 Impact
-
-- **Promotes fair hiring practices** by removing unconscious bias
-- **Focuses on skills and qualifications** rather than personal attributes
-- **Helps companies build diverse teams** and meet inclusion goals
-- **Provides data-driven insights** for HR decision making
-
-## 🎯 Use Cases
-
-- HR departments screening candidates
-- Recruitment agencies improving processes
-- Companies ensuring compliance with diversity goals
-- Researchers studying hiring bias patterns
-
-## 🔮 Future Enhancements
-
-- Machine learning model improvements
-- Multi-language support (Spanish, French, German)
-- ATS system integrations (Workday, SAP)
-- Advanced analytics dashboard
-- Mobile application
-- API for third-party integrations
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built with Flask and modern web technologies
-- Inspired by the need for fair and inclusive hiring practices
-- Thanks to the open-source community for amazing tools and libraries
+</div>
 
 ---
 
-**Making hiring fair, one application at a time** 🌟
+## 📌 The Problem
 
-⭐ Star this repository if you found it helpful!
+Traditional hiring processes are riddled with unconscious bias — from gendered language in job descriptions that discourages qualified candidates, to resume screening that prioritizes names and backgrounds over skills. This project tackles that at the source, using AI to make hiring decisions based on **what candidates can do**, not who they are.
+
+---
+
+## ✨ Features
+
+### 🔍 Bias Detection in Job Descriptions
+- Identifies **gender bias** (e.g., masculine-coded words like "aggressive," "dominant")
+- Flags **age bias** (e.g., "young and energetic," "recent graduate")
+- Catches **personality bias** (e.g., "culture fit" language)
+- Detects **ethnicity-coded** language patterns
+- Provides a **bias score** with line-by-line flagging
+
+### 🔒 Resume Anonymization
+- Strips personally identifiable information (name, gender markers, age indicators)
+- Removes school/college names that could trigger prestige bias
+- Retains skills, experience, and qualifications intact
+- Outputs a **clean, anonymized version** for fair screening
+
+### 🎯 Skill-Based Candidate Matching
+- Computes **job-candidate compatibility %** based purely on skills
+- Supports **20+ predefined job roles** with curated skill requirements
+- Upload PDF resumes — extraction is automatic
+
+### 📊 Performance Analytics
+- Confusion matrix showing system accuracy on bias classification
+- Precision, recall, and F1 metrics for model transparency
+
+---
+
+## 🛠️ Tech Stack
+
+```
+Backend           → Python 3.9+, Flask
+NLP / AI          → NLTK, scikit-learn
+PDF Processing    → PyPDF2, PyMuPDF
+Data Layer        → Pandas, NumPy
+Frontend          → HTML5, CSS3, Vanilla JavaScript
+Deployment        → Vercel (Frontend), Heroku (Backend via Procfile)
+```
+
+---
+
+## 🗂️ Project Structure
+
+```
+ai-bias-reduction-hiring/
+├── app.py                      # Main Flask application & route handlers
+├── templates/
+│   ├── index.html              # Main UI — upload + analyze interface
+│   └── confusion_matrix.html  # Model performance analytics page
+├── static/
+│   ├── css/                    # Stylesheets
+│   └── js/                     # Client-side JavaScript
+├── sample_pdfs/                # Sample resumes for testing
+├── requirements.txt            # Python dependencies (development)
+├── requirements_deploy.txt     # Python dependencies (production)
+├── Procfile                    # Heroku deployment config
+└── README.md
+```
+
+---
+
+## ⚙️ Local Setup
+
+### Prerequisites
+- Python 3.9 or higher
+- pip
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/linga-1221/ai-bias-reduction-hiring.git
+cd ai-bias-reduction-hiring
+```
+
+### 2. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Download NLTK data (first run only)
+```python
+python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
+```
+
+### 4. Run the application
+```bash
+python app.py
+```
+
+### 5. Open in browser
+```
+http://127.0.0.1:5003
+```
+
+---
+
+## 🧠 How It Works
+
+```
+User selects a job role + uploads PDF resume
+              ↓
+PyPDF2 / PyMuPDF extract raw resume text
+              ↓
+┌─────────────────────────────────────────┐
+│  Two parallel pipelines run:            │
+│                                         │
+│  1. Bias Detector                       │
+│     NLTK tokenizes job description      │
+│     → scikit-learn classifier scores    │
+│       bias type + severity              │
+│                                         │
+│  2. Anonymizer + Skill Matcher          │
+│     PII stripped from resume            │
+│     → Skills extracted via keyword NLP  │
+│     → Match % computed vs. job role     │
+└─────────────────────────────────────────┘
+              ↓
+Flask renders results:
+  ✅ Compatibility score
+  🔴 Missing skills
+  ⚠️  Bias flags in JD
+  📄 Anonymized resume output
+```
+
+---
+
+## 🖥️ Usage
+
+1. **Select a job role** from 20+ predefined options (Software Engineer, Data Analyst, Product Manager, etc.)
+2. **Upload a PDF resume** using the file picker
+3. **Click "Analyze"** to instantly get:
+   - Job match percentage
+   - Matching vs. missing skills breakdown
+   - Bias flags found in the job description
+   - Anonymized resume for blind screening
+4. **View system performance** on the Analytics page (confusion matrix)
+
+---
+
+## 📊 Sample Output
+
+```
+Job Role: Data Scientist
+Match Score: 78%
+
+✅ Matched Skills: Python, Machine Learning, SQL, Pandas, NumPy
+❌ Missing Skills: TensorFlow, Tableau, Spark
+
+⚠️ Bias Detected in Job Description:
+  → "young and dynamic team" — Age bias (line 3)
+  → "aggressive go-getter" — Gender bias (line 7)
+
+📄 Anonymized Resume: [Available for download]
+```
+
+---
+
+## 🎯 Use Cases
+
+- **HR teams** screening high-volume candidates fairly
+- **Recruitment agencies** auditing their job description language
+- **Companies** ensuring DEI compliance in hiring pipelines
+- **Researchers** studying algorithmic fairness in recruitment
+
+---
+
+## 🔮 Roadmap
+
+- [ ] LLM-powered bias explanation (GPT / Gemini integration)
+- [ ] Multi-language job description support (Spanish, French, German)
+- [ ] ATS integrations (Workday, Greenhouse, Lever)
+- [ ] Real-time browser extension for JD scanning
+- [ ] REST API for third-party HR tool integrations
+- [ ] Bias trend dashboard across multiple job postings
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome — especially around expanding bias detection categories and improving model accuracy.
+
+```bash
+# Fork → Branch → Commit → PR
+git checkout -b feature/your-feature
+git commit -m "Add: describe your change"
+git push origin feature/your-feature
+```
+
+Please open an issue first to discuss major changes.
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## 📬 Contact
+
+**Nagalinga K.**
+- 💼 LinkedIn: [linkedin.com/in/nagalinga-k](https://linkedin.com/in/nagalinga-k)
+- 📧 Email: nagakuchivaripalli@gmail.com
+- 🐙 GitHub: [@linga-1221](https://github.com/linga-1221)
+
+---
+
+<div align="center">
+
+⭐ **Star this repo if you believe hiring should be fair.**
+
+*Built with 🤖 and a commitment to inclusive recruitment.*
+
+*by [Nagalinga K.](https://github.com/linga-1221)*
+
+</div>
