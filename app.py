@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flask app with multiple resume upload support"""
+"""Flask app - AI Bias Detection in Hiring"""
 
 from flask import Flask, request, jsonify, render_template
 import os
@@ -74,25 +74,124 @@ job_roles = {
     }
 }
 
+# Enhanced bias keywords with severity weights (1=low, 2=medium, 3=high)
 BIAS_KEYWORDS = {
     "gender": {
-        "male_biased": ["strong", "aggressive", "competitive", "dominant", "assertive"],
-        "female_biased": ["nurturing", "collaborative", "supportive"],
-        "neutral": ["skilled", "qualified", "experienced", "proficient"]
+        "words": {
+            "aggressive": 3, "dominant": 3, "assertive": 2, "competitive": 2,
+            "strong": 1, "ambitious": 1, "driven": 1, "fearless": 2,
+            "nurturing": 2, "supportive": 1, "collaborative": 1, "empathetic": 1,
+            "guys": 3, "manpower": 3, "mankind": 2, "chairman": 2,
+            "rockstar": 2, "ninja": 2, "hero": 2, "warrior": 2
+        },
+        "neutral_alternatives": {
+            "aggressive": "goal-oriented", "dominant": "influential",
+            "rockstar": "high-performing", "ninja": "expert",
+            "guys": "team", "manpower": "workforce"
+        }
     },
     "age": {
-        "biased": ["young", "energetic", "fresh", "recent graduate", "digital native", "mature", "experienced", "seasoned"],
-        "neutral": ["qualified", "skilled", "talented"]
+        "words": {
+            "young": 3, "energetic": 2, "fresh": 2, "recent graduate": 3,
+            "digital native": 3, "youthful": 3, "dynamic": 1,
+            "mature": 2, "seasoned": 2, "veteran": 1, "experienced": 1,
+            "old-school": 3, "traditional": 1, "established": 1
+        },
+        "neutral_alternatives": {
+            "young": "skilled", "energetic": "motivated",
+            "fresh": "innovative", "recent graduate": "entry-level candidate",
+            "digital native": "tech-savvy", "mature": "accomplished"
+        }
     },
     "personality": {
-        "biased": ["rockstar", "ninja", "guru", "fast-paced"],
-        "neutral": ["motivated", "dedicated", "team-oriented"]
+        "words": {
+            "guru": 2, "wizard": 2, "genius": 2, "superstar": 2,
+            "fast-paced": 2, "hustle": 3, "grind": 3, "intensity": 2,
+            "cultural fit": 2, "culture fit": 2, "beer test": 3,
+            "work hard play hard": 2, "passionate": 1, "obsessed": 2
+        },
+        "neutral_alternatives": {
+            "guru": "subject matter expert", "wizard": "specialist",
+            "hustle": "high-impact work", "cultural fit": "values alignment",
+            "obsessed": "deeply focused"
+        }
+    },
+    "exclusionary": {
+        "words": {
+            "native speaker": 3, "fluent english": 2, "perfect english": 3,
+            "ivy league": 3, "top university": 2, "elite school": 3,
+            "physically fit": 3, "able-bodied": 3, "no disabilities": 3,
+            "clean background": 2, "all american": 3
+        },
+        "neutral_alternatives": {
+            "native speaker": "strong communication skills",
+            "ivy league": "accredited university",
+            "physically fit": "able to perform job duties"
+        }
     }
 }
 
+# Ground-truth labeled test set for confusion matrix
+LABELED_TEST_DATA = [
+    ("We need a strong aggressive rockstar programmer with competitive spirit", True),
+    ("Looking for a young energetic digital native recent graduate", True),
+    ("Seeking a ninja guru wizard who is dominant and assertive", True),
+    ("Must be a cultural fit who works hard plays hard in our hustle culture", True),
+    ("Ivy league degree required native english speaker only", True),
+    ("We need a skilled developer with problem-solving abilities", False),
+    ("Looking for a qualified engineer with technical expertise", False),
+    ("Seeking a proficient candidate with relevant experience", False),
+    ("We want a talented professional with good communication skills", False),
+    ("Join our team as a dedicated software engineer", False),
+    ("The candidate should be experienced mature and seasoned", True),
+    ("Looking for a passionate obsessed fast-paced team member", True),
+    ("Collaborative team player with proven track record", False),
+    ("Energetic fresh perspective dynamic young professional", True),
+    ("Results-driven professional with strong analytical skills", False),
+]
+
 # In-memory storage
-analytics_storage = {'total_resumes': 0, 'bias_detections': [], 'processing_history': []}
+analytics_storage = {
+    'total_resumes': 0,
+    'bias_detections': [],
+    'processing_history': [],
+    'match_scores': [],
+    'skill_gaps': defaultdict(int)
+}
 confusion_data = {'predictions': []}
+
+
+def analyze_job_description_bias(text):
+    """Enhanced bias detection with severity scoring and suggestions"""
+    text_lower = text.lower()
+    bias_report = defaultdict(list)
+    severity_total = 0
+
+    for category, data in BIAS_KEYWORDS.items():
+        for keyword, severity in data['words'].items():
+            if keyword in text_lower:
+                # Avoid false positives — skip if preceded by "not" or "avoid"
+                pattern = r'(?<!\bnot\s)(?<!\bavoid\s)' + re.escape(keyword)
+                if re.search(pattern, text_lower):
+                    bias_report[category].append({
+                        'word': keyword,
+                        'severity': severity,
+                        'suggestion': data['neutral_alternatives'].get(keyword, 'Use neutral language')
+                    })
+                    severity_total += severity
+
+    return bias_report, severity_total
+
+
+def get_bias_level(severity_score):
+    """Return bias level label based on severity score"""
+    if severity_score == 0:
+        return 'none', '#28a745'
+    if severity_score <= 3:
+        return 'low', '#ffc107'
+    if severity_score <= 7:
+        return 'medium', '#fd7e14'
+    return 'high', '#dc3545'
 
 
 def extract_text_from_pdf(file_path):
@@ -118,46 +217,46 @@ def extract_text_from_pdf(file_path):
 
 def anonymize_resume(text):
     """Remove personal identifiers from resume"""
-    text = re.sub(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', '[CANDIDATE NAME]', text)
-    text = re.sub(r'\b\w+@\w+\.\w+\b', '[EMAIL]', text)
-    text = re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE]', text)
-    text = re.sub(r'\b(Male|Female|man|woman|he/him|she/her)\b', '[GENDER]', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', '[NAME]', text)
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', text)
+    text = re.sub(r'(\+?\d[\d\s\-().]{7,}\d)', '[PHONE]', text)
+    text = re.sub(r'\b(Male|Female|He|She|Him|Her|His|Hers|he/him|she/her|they/them)\b', '[PRONOUN]', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(Mr\.|Mrs\.|Ms\.|Miss|Dr\.)\s+\w+', '[NAME]', text)
+    text = re.sub(r'\b(linkedin\.com/in/|github\.com/)\S+', '[PROFILE_URL]', text, flags=re.IGNORECASE)
     return text
 
 
-def analyze_job_description_bias(text):
-    """Detect biased language in job descriptions"""
-    words = text.lower().split()
-    bias_report = defaultdict(list)
-    for category, bias_types in BIAS_KEYWORDS.items():
-        for bias_type, keywords in bias_types.items():
-            if bias_type != "neutral":
-                for word in words:
-                    if word in keywords:
-                        bias_report[category].append(word)
-    return bias_report
-
-
 def extract_skills_from_text(text):
-    """Extract skills from resume text"""
+    """Extract skills with broader coverage"""
     common_skills = [
-        "python", "java", "javascript", "html", "css", "sql", "nosql", "mongodb",
-        "react", "angular", "vue", "node", "express", "django", "flask",
-        "machine learning", "data analysis", "data science", "ai", "artificial intelligence",
-        "git", "docker", "kubernetes", "aws", "azure", "gcp",
-        "project management", "agile", "scrum", "leadership", "teamwork",
-        "algorithms", "data structures", "pandas", "numpy", "tensorflow", "pytorch"
+        "python", "java", "javascript", "typescript", "html", "css", "sql", "nosql",
+        "mongodb", "postgresql", "mysql", "react", "angular", "vue", "node", "express",
+        "django", "flask", "fastapi", "spring", "machine learning", "deep learning",
+        "data analysis", "data science", "artificial intelligence", "nlp",
+        "git", "github", "docker", "kubernetes", "aws", "azure", "gcp", "linux",
+        "ci/cd", "devops", "terraform", "ansible", "jenkins",
+        "project management", "agile", "scrum", "kanban", "jira",
+        "leadership", "teamwork", "communication", "problem solving",
+        "algorithms", "data structures", "system design", "microservices",
+        "pandas", "numpy", "tensorflow", "pytorch", "scikit-learn", "keras",
+        "tableau", "power bi", "excel", "r", "scala", "go", "rust", "c++", "c#",
+        "rest api", "graphql", "redis", "elasticsearch", "spark", "hadoop",
+        "blockchain", "cybersecurity", "networking", "cloud computing"
     ]
     text_lower = text.lower()
     return [skill for skill in common_skills if skill in text_lower]
 
 
 def calculate_job_match(resume_skills, job_skills):
-    """Calculate how well resume matches job requirements"""
+    """Calculate match with bonus for extra skills"""
     if not job_skills:
         return {"match_percentage": 0, "matching_skills": [], "missing_skills": []}
     matching = list(set(resume_skills) & set(job_skills))
-    match_percentage = round((len(matching) / len(job_skills)) * 100, 2)
+    base_pct = round((len(matching) / len(job_skills)) * 100, 2)
+    # Bonus: extra relevant skills beyond requirements (max +5%)
+    extra = len(set(resume_skills) - set(job_skills))
+    bonus = min(extra * 0.5, 5.0)
+    match_percentage = min(round(base_pct + bonus, 2), 100.0)
     return {
         "match_percentage": match_percentage,
         "matching_skills": matching,
@@ -166,12 +265,13 @@ def calculate_job_match(resume_skills, job_skills):
 
 
 def build_recommendation(match_percentage):
-    """Return recommendation string based on match percentage"""
-    if match_percentage >= 70:
-        return "Excellent match!"
+    if match_percentage >= 80:
+        return "Strong match — highly recommended for interview."
+    if match_percentage >= 60:
+        return "Good match — recommend for interview with minor skill gaps."
     if match_percentage >= 40:
-        return "Good match with some gaps."
-    return "Limited match."
+        return "Partial match — consider if candidate shows strong growth potential."
+    return "Low match — significant skill gaps identified."
 
 
 def process_single_resume(file_path, filename, job_data):
@@ -193,7 +293,7 @@ def process_single_resume(file_path, filename, job_data):
             'matching_skills': match_result['matching_skills'],
             'missing_skills': match_result['missing_skills'],
             'recommendation': build_recommendation(match_percentage),
-            'anonymized_resume': anonymized_resume[:500] + '...' if len(anonymized_resume) > 500 else anonymized_resume
+            'anonymized_resume': anonymized_resume[:600] + '...' if len(anonymized_resume) > 600 else anonymized_resume
         }
     except Exception as e:
         logger.error("Error processing resume %s: %s", filename, e)
@@ -206,23 +306,32 @@ def process_single_resume(file_path, filename, job_data):
 
 
 def generate_confusion_matrix():
-    """Generate confusion matrix from actual predictions"""
-    if not confusion_data['predictions']:
-        return {
-            'matrix': {'true_positive': 0, 'true_negative': 0, 'false_positive': 0, 'false_negative': 0},
-            'metrics': {'accuracy': 0, 'precision': 0, 'recall': 0, 'f1_score': 0},
-            'results': []
-        }
-    preds = confusion_data['predictions']
+    """Generate confusion matrix using labeled ground-truth test data"""
+    preds = []
+    for description, actual_label in LABELED_TEST_DATA:
+        bias_report, severity = analyze_job_description_bias(description)
+        predicted = severity > 0
+        preds.append({
+            'description': description,
+            'predicted': predicted,
+            'actual': actual_label
+        })
+
+    # Also include real upload predictions
+    for p in confusion_data['predictions']:
+        preds.append(p)
+
     tp = sum(1 for p in preds if p['predicted'] and p['actual'])
     tn = sum(1 for p in preds if not p['predicted'] and not p['actual'])
     fp = sum(1 for p in preds if p['predicted'] and not p['actual'])
     fn = sum(1 for p in preds if not p['predicted'] and p['actual'])
     total = len(preds)
+
     accuracy = (tp + tn) / total if total > 0 else 0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
     return {
         'matrix': {'true_positive': tp, 'true_negative': tn, 'false_positive': fp, 'false_negative': fn},
         'metrics': {
@@ -241,7 +350,6 @@ def generate_confusion_matrix():
 
 
 def save_uploaded_files(pdf_files):
-    """Save uploaded files to disk and return list of (path, original_filename)"""
     saved = []
     for i, (file, filename) in enumerate(pdf_files):
         safe_name = secure_filename(filename) or "resume.pdf"
@@ -252,31 +360,23 @@ def save_uploaded_files(pdf_files):
     return saved
 
 
-def run_parallel_processing(saved_files, job_data):
-    """Process resumes sequentially (safe for serverless)"""
-    results = []
-    for fp, fn in saved_files:
-        try:
-            results.append(process_single_resume(fp, fn, job_data))
-        except Exception as e:
-            logger.error("Failed processing %s: %s", fn, e)
-            results.append({'filename': fn, 'error': str(e), 'status': 'failed'})
-    return results
-
-
-def build_bias_details(bias_report):
-    """Format bias report into response-ready list"""
+def build_bias_details(bias_report, severity_total):
     details = []
     bias_detected = False
-    for category, words in bias_report.items():
-        if words:
+    for category, items in bias_report.items():
+        if items:
             bias_detected = True
-            details.append({'category': category.title(), 'words': list(set(words))})
-    return bias_detected, details
+            details.append({
+                'category': category.replace('_', ' ').title(),
+                'words': [i['word'] for i in items],
+                'suggestions': {i['word']: i['suggestion'] for i in items},
+                'severity': sum(i['severity'] for i in items)
+            })
+    bias_level, bias_color = get_bias_level(severity_total)
+    return bias_detected, details, bias_level, bias_color
 
 
 def build_summary(pdf_files, results):
-    """Calculate summary statistics from results"""
     successful = [r for r in results if r['status'] == 'success']
     failed = [r for r in results if r['status'] == 'failed']
     return {
@@ -288,24 +388,40 @@ def build_summary(pdf_files, results):
     }
 
 
-def update_analytics(job_data, successful_count, bias_detected, bias_report):
-    """Update in-memory analytics storage"""
-    analytics_storage['total_resumes'] += successful_count
+def update_analytics(job_data, results, bias_detected, bias_report, severity_total):
+    successful = [r for r in results if r['status'] == 'success']
+    analytics_storage['total_resumes'] += len(successful)
+
+    for r in successful:
+        analytics_storage['match_scores'].append(r['match_percentage'])
+        for skill in r.get('missing_skills', []):
+            analytics_storage['skill_gaps'][skill] += 1
+
     if bias_detected:
-        analytics_storage['bias_detections'].append(list(bias_report.keys()))
+        analytics_storage['bias_detections'].append({
+            'categories': list(bias_report.keys()),
+            'severity': severity_total,
+            'job_role': job_data['title'],
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+
     analytics_storage['processing_history'].append({
         'job_role': job_data['title'],
-        'count': successful_count,
+        'count': len(successful),
+        'avg_match': round(sum(r['match_percentage'] for r in successful) / len(successful), 1) if successful else 0,
+        'bias_detected': bias_detected,
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
     })
+
     confusion_data['predictions'].append({
         'description': job_data['description'],
         'predicted': bias_detected,
         'actual': bias_detected
     })
-    # Cap to last 100 entries to prevent memory growth
+
     analytics_storage['processing_history'] = analytics_storage['processing_history'][-100:]
     analytics_storage['bias_detections'] = analytics_storage['bias_detections'][-100:]
+    analytics_storage['match_scores'] = analytics_storage['match_scores'][-500:]
     confusion_data['predictions'] = confusion_data['predictions'][-100:]
 
 
@@ -323,36 +439,58 @@ def confusion_matrix():
 def check_bias_realtime():
     data = request.get_json()
     text = data.get('text', '') if data else ''
-    bias_report = analyze_job_description_bias(text)
-    bias_words = list({word for words in bias_report.values() for word in words})
+    bias_report, severity = analyze_job_description_bias(text)
+    bias_words = [item['word'] for items in bias_report.values() for item in items]
+    bias_level, bias_color = get_bias_level(severity)
     return jsonify({
         'bias_detected': bool(bias_words),
-        'bias_words': bias_words,
-        'bias_score': len(bias_words)
+        'bias_words': list(set(bias_words)),
+        'bias_score': severity,
+        'bias_level': bias_level,
+        'bias_color': bias_color
     })
 
 
 @app.route('/analytics')
 def analytics_dashboard():
     bias_counts = defaultdict(int)
-    for bias in analytics_storage['bias_detections']:
-        for category in bias:
-            bias_counts[category] += 1
+    severity_sum = 0
+    for b in analytics_storage['bias_detections']:
+        for cat in b['categories']:
+            bias_counts[cat] += 1
+        severity_sum += b.get('severity', 0)
 
     total = analytics_storage['total_resumes']
     bias_incidents = len(analytics_storage['bias_detections'])
+    scores = analytics_storage['match_scores']
+    top_gaps = sorted(analytics_storage['skill_gaps'].items(), key=lambda x: x[1], reverse=True)[:8]
+
+    # Match score distribution buckets
+    score_dist = {'0-25': 0, '26-50': 0, '51-75': 0, '76-100': 0}
+    for s in scores:
+        if s <= 25:
+            score_dist['0-25'] += 1
+        elif s <= 50:
+            score_dist['26-50'] += 1
+        elif s <= 75:
+            score_dist['51-75'] += 1
+        else:
+            score_dist['76-100'] += 1
+
     analytics_data = {
         'total_resumes_processed': total,
         'bias_incidents_detected': bias_incidents,
-        'average_bias_score': round(
-            sum(len(b) for b in analytics_storage['bias_detections']) / bias_incidents, 2
-        ) if bias_incidents else 0,
+        'average_bias_severity': round(severity_sum / bias_incidents, 1) if bias_incidents else 0,
+        'average_match_score': round(sum(scores) / len(scores), 1) if scores else 0,
+        'clean_rate': round((total - bias_incidents) / total * 100, 1) if total > 0 else 0,
         'top_bias_categories': [
-            {'category': k.title(), 'count': v}
+            {'category': k.replace('_', ' ').title(), 'count': v}
             for k, v in sorted(bias_counts.items(), key=lambda x: x[1], reverse=True)
         ],
         'processing_history': analytics_storage['processing_history'][-10:],
-        'clean_rate': round((total - bias_incidents) / total * 100, 1) if total > 0 else 0
+        'top_skill_gaps': [{'skill': k, 'count': v} for k, v in top_gaps],
+        'score_distribution': score_dist,
+        'recent_bias': analytics_storage['bias_detections'][-5:][::-1]
     }
     return render_template('analytics.html', data=analytics_data)
 
@@ -376,18 +514,28 @@ def upload_resume():
 
         job_data = job_roles[job_role]
         saved_files = save_uploaded_files(pdf_files)
-        results = run_parallel_processing(saved_files, job_data)
 
-        bias_report = analyze_job_description_bias(job_data['description'])
-        bias_detected, bias_details = build_bias_details(bias_report)
+        results = []
+        for fp, fn in saved_files:
+            try:
+                results.append(process_single_resume(fp, fn, job_data))
+            except Exception as e:
+                logger.error("Failed processing %s: %s", fn, e)
+                results.append({'filename': fn, 'error': str(e), 'status': 'failed'})
+
+        bias_report, severity_total = analyze_job_description_bias(job_data['description'])
+        bias_detected, bias_details, bias_level, bias_color = build_bias_details(bias_report, severity_total)
         summary = build_summary(pdf_files, results)
-        update_analytics(job_data, summary['successful'], bias_detected, bias_report)
+        update_analytics(job_data, results, bias_detected, bias_report, severity_total)
 
         return jsonify({
             'results': results,
             'summary': summary,
             'bias_detected': bias_detected,
             'bias_details': bias_details,
+            'bias_level': bias_level,
+            'bias_color': bias_color,
+            'severity_score': severity_total,
             'job_title': job_data['title']
         })
     except Exception as e:

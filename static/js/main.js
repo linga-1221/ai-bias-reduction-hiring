@@ -85,7 +85,12 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
 
             if (data.error) {
                 const errEl = document.createElement('div');
-                errEl.innerHTML = `<h3>Error</h3><p>${escapeHtml(data.error)}</p>`;
+                const h3 = document.createElement('h3');
+                h3.textContent = 'Error';
+                const p = document.createElement('p');
+                p.textContent = data.error;
+                errEl.appendChild(h3);
+                errEl.appendChild(p);
                 resultDiv.appendChild(errEl);
             } else {
                 resultDiv.appendChild(buildResultsDOM(data));
@@ -97,7 +102,12 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
             const resultDiv = document.getElementById('result');
             resultDiv.innerHTML = '';
             const errEl = document.createElement('div');
-            errEl.innerHTML = `<h3>Error</h3><p>${escapeHtml('Network error: ' + error.message)}</p>`;
+            const h3 = document.createElement('h3');
+            h3.textContent = 'Error';
+            const p = document.createElement('p');
+            p.textContent = 'Network error: ' + error.message;
+            errEl.appendChild(h3);
+            errEl.appendChild(p);
             resultDiv.appendChild(errEl);
             resultDiv.style.display = 'block';
         });
@@ -106,23 +116,17 @@ document.getElementById('uploadForm').addEventListener('submit', function(e) {
 function buildResultsDOM(data) {
     const container = document.createElement('div');
 
-    // Title
     const title = document.createElement('h2');
-    title.textContent = 'Batch Analysis Results';
+    title.textContent = `Results — ${data.job_title}`;
     container.appendChild(title);
 
-    // Summary
     container.appendChild(buildSummarySection(data.summary));
 
-    // Top Candidates
     if (data.summary.top_candidates.length > 0) {
         container.appendChild(buildTopCandidatesSection(data.summary.top_candidates));
     }
 
-    // Bias Analysis
-    container.appendChild(buildBiasSection(data.bias_detected, data.bias_details));
-
-    // Detailed Results
+    container.appendChild(buildBiasSection(data.bias_detected, data.bias_details, data.bias_level, data.severity_score));
     container.appendChild(buildDetailedResults(data.results));
 
     return container;
@@ -139,7 +143,7 @@ function buildSummarySection(summary) {
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0;';
 
     const cards = [
-        { label: 'Total Files', value: summary.total_files, color: '#28a745', bg: '#e8f5e8' },
+        { label: 'Total Files', value: summary.total_files, color: '#6c63ff', bg: '#f0eeff' },
         { label: 'Successful', value: summary.successful, color: '#28a745', bg: '#e8f5e8' },
         { label: 'Failed', value: summary.failed, color: '#dc3545', bg: '#ffe8e8' },
         { label: 'Avg Match', value: `${summary.average_match}%`, color: '#0066cc', bg: '#e8f4fd' }
@@ -174,7 +178,7 @@ function buildTopCandidatesSection(candidates) {
     wrapper.style.cssText = 'background:#f8f9fa;padding:20px;border-radius:10px;';
 
     candidates.forEach((c, i) => {
-        const color = c.match_percentage > 70 ? '#28a745' : c.match_percentage > 40 ? '#f39c12' : '#e74c3c';
+        const color = c.match_percentage >= 80 ? '#27ae60' : c.match_percentage >= 60 ? '#f39c12' : c.match_percentage >= 40 ? '#fd7e14' : '#e74c3c';
         const card = document.createElement('div');
         card.style.cssText = `background:white;margin:10px 0;padding:15px;border-radius:8px;border-left:4px solid ${color};`;
 
@@ -189,7 +193,7 @@ function buildTopCandidatesSection(candidates) {
         row.appendChild(pct);
 
         const rec = document.createElement('div');
-        rec.style.cssText = 'margin-top:8px;color:#666;';
+        rec.style.cssText = 'margin-top:8px;color:#666;font-size:0.9rem;';
         rec.textContent = c.recommendation;
 
         card.appendChild(row);
@@ -201,7 +205,7 @@ function buildTopCandidatesSection(candidates) {
     return section;
 }
 
-function buildBiasSection(biasDetected, biasDetails) {
+function buildBiasSection(biasDetected, biasDetails, biasLevel, severityScore) {
     const section = document.createElement('div');
     section.className = 'section';
     const h3 = document.createElement('h3');
@@ -209,34 +213,66 @@ function buildBiasSection(biasDetected, biasDetails) {
     section.appendChild(h3);
 
     if (biasDetected) {
+        const levelColors = { low: '#ffc107', medium: '#fd7e14', high: '#dc3545' };
+        const color = levelColors[biasLevel] || '#dc3545';
+
         const box = document.createElement('div');
         box.className = 'bias-warning';
+
+        // Severity header
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
         const h4 = document.createElement('h4');
-        h4.textContent = 'Potential Bias Detected:';
-        box.appendChild(h4);
+        h4.style.margin = '0';
+        h4.textContent = 'Bias Detected in Job Description';
+        const badge = document.createElement('span');
+        badge.style.cssText = `background:${color};color:white;padding:4px 12px;border-radius:20px;font-size:0.85rem;font-weight:700;`;
+        badge.textContent = `${biasLevel.toUpperCase()} — Score: ${severityScore}`;
+        header.appendChild(h4);
+        header.appendChild(badge);
+        box.appendChild(header);
 
         biasDetails.forEach(bias => {
             const row = document.createElement('div');
-            row.style.cssText = 'margin:10px 0;padding:10px;background:rgba(255,255,255,0.7);border-radius:8px;';
+            row.style.cssText = 'margin:10px 0;padding:12px;background:rgba(255,255,255,0.8);border-radius:8px;border-left:3px solid '+color+';';
+
             const label = document.createElement('strong');
-            label.textContent = `${bias.category} Bias: `;
+            label.textContent = `${bias.category} Bias (severity: ${bias.severity})`;
             row.appendChild(label);
+            row.appendChild(document.createElement('br'));
+
+            const badgeWrap = document.createElement('div');
+            badgeWrap.style.margin = '8px 0';
             bias.words.forEach(word => {
-                const badge = document.createElement('span');
-                badge.style.cssText = 'background:#fff;padding:3px 8px;border-radius:15px;margin:0 3px;border:1px solid #f39c12;';
-                badge.textContent = word;
-                row.appendChild(badge);
+                const b = document.createElement('span');
+                b.style.cssText = 'background:#fff;padding:3px 8px;border-radius:12px;margin:2px;border:1px solid '+color+';font-size:0.85rem;display:inline-block;';
+                b.textContent = word;
+                badgeWrap.appendChild(b);
             });
+            row.appendChild(badgeWrap);
+
+            // Suggestions
+            if (bias.suggestions && Object.keys(bias.suggestions).length > 0) {
+                const sugLabel = document.createElement('div');
+                sugLabel.style.cssText = 'font-size:0.82rem;color:#666;margin-top:6px;';
+                sugLabel.textContent = '💡 Suggestions: ';
+                Object.entries(bias.suggestions).forEach(([word, sug]) => {
+                    sugLabel.textContent += `"${word}" → "${sug}"  `;
+                });
+                row.appendChild(sugLabel);
+            }
+
             box.appendChild(row);
         });
+
         section.appendChild(box);
     } else {
         const box = document.createElement('div');
         box.className = 'bias-safe';
         const h4 = document.createElement('h4');
-        h4.textContent = 'Bias-Free Job Description';
+        h4.textContent = '✅ Bias-Free Job Description';
         const p = document.createElement('p');
-        p.textContent = 'No significant bias detected in the job description.';
+        p.textContent = 'No significant bias detected. The language appears neutral and inclusive.';
         box.appendChild(h4);
         box.appendChild(p);
         section.appendChild(box);
@@ -249,18 +285,14 @@ function buildDetailedResults(results) {
     const section = document.createElement('div');
     section.className = 'section';
     const h3 = document.createElement('h3');
-    h3.textContent = 'Detailed Results';
+    h3.textContent = `Detailed Results (${results.length} resume${results.length > 1 ? 's' : ''})`;
     section.appendChild(h3);
 
     const scrollBox = document.createElement('div');
-    scrollBox.style.cssText = 'max-height:600px;overflow-y:auto;background:#f8f9fa;padding:15px;border-radius:10px;';
+    scrollBox.style.cssText = 'max-height:700px;overflow-y:auto;background:#f8f9fa;padding:15px;border-radius:10px;';
 
     results.forEach(result => {
-        if (result.status === 'success') {
-            scrollBox.appendChild(buildSuccessCard(result));
-        } else {
-            scrollBox.appendChild(buildFailCard(result));
-        }
+        scrollBox.appendChild(result.status === 'success' ? buildSuccessCard(result) : buildFailCard(result));
     });
 
     section.appendChild(scrollBox);
@@ -268,42 +300,42 @@ function buildDetailedResults(results) {
 }
 
 function buildSuccessCard(result) {
-    const color = result.match_percentage > 70 ? '#28a745' : result.match_percentage > 40 ? '#f39c12' : '#e74c3c';
+    const color = result.match_percentage >= 80 ? '#27ae60' : result.match_percentage >= 60 ? '#f39c12' : result.match_percentage >= 40 ? '#fd7e14' : '#e74c3c';
     const card = document.createElement('div');
     card.style.cssText = `background:white;margin:15px 0;padding:20px;border-radius:10px;border-left:4px solid ${color};`;
 
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;';
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
     const h4 = document.createElement('h4');
     h4.style.margin = '0';
     h4.textContent = result.filename;
     const pct = document.createElement('span');
-    pct.style.cssText = `color:${color};font-weight:bold;font-size:20px;`;
+    pct.style.cssText = `color:${color};font-weight:bold;font-size:22px;`;
     pct.textContent = `${result.match_percentage}%`;
     row.appendChild(h4);
     row.appendChild(pct);
     card.appendChild(row);
 
     const rec = document.createElement('div');
-    rec.style.margin = '10px 0';
+    rec.style.cssText = 'margin:8px 0 14px;padding:8px 12px;background:#f8f9fa;border-radius:6px;font-size:0.9rem;';
     const recLabel = document.createElement('strong');
     recLabel.textContent = 'Recommendation: ';
     rec.appendChild(recLabel);
     rec.appendChild(document.createTextNode(result.recommendation));
     card.appendChild(rec);
 
-    card.appendChild(buildSkillBadges('Matching Skills:', result.matching_skills, '#e7f3ff', '#0066cc'));
-    card.appendChild(buildSkillBadges('Missing Skills:', result.missing_skills, '#ffe8e8', '#dc3545'));
+    card.appendChild(buildSkillBadges('✅ Matching Skills:', result.matching_skills, '#e7f3ff', '#0066cc'));
+    card.appendChild(buildSkillBadges('❌ Missing Skills:', result.missing_skills, '#ffe8e8', '#dc3545'));
 
     const details = document.createElement('details');
-    details.style.marginTop = '15px';
+    details.style.marginTop = '14px';
     const summary = document.createElement('summary');
-    summary.style.cssText = 'cursor:pointer;font-weight:bold;';
-    summary.textContent = 'View Anonymized Resume';
+    summary.style.cssText = 'cursor:pointer;font-weight:600;color:#6c63ff;';
+    summary.textContent = '🔒 View Anonymized Resume';
     const resumeBox = document.createElement('div');
-    resumeBox.style.cssText = 'background:#f8f9fa;padding:15px;border-radius:8px;margin-top:10px;max-height:200px;overflow-y:auto;';
+    resumeBox.style.cssText = 'background:#f8f9fa;padding:15px;border-radius:8px;margin-top:10px;max-height:220px;overflow-y:auto;border:1px solid #e0e0e0;';
     const pre = document.createElement('pre');
-    pre.style.cssText = 'white-space:pre-wrap;font-size:12px;margin:0;';
+    pre.style.cssText = 'white-space:pre-wrap;font-size:12px;margin:0;color:#444;';
     pre.textContent = result.anonymized_resume;
     resumeBox.appendChild(pre);
     details.appendChild(summary);
@@ -315,18 +347,26 @@ function buildSuccessCard(result) {
 
 function buildSkillBadges(label, skills, bgColor, textColor) {
     const wrapper = document.createElement('div');
-    wrapper.style.margin = '15px 0';
+    wrapper.style.margin = '12px 0';
     const strong = document.createElement('strong');
+    strong.style.fontSize = '0.9rem';
     strong.textContent = label;
     wrapper.appendChild(strong);
     const badgeBox = document.createElement('div');
-    badgeBox.style.marginTop = '8px';
-    skills.forEach(skill => {
-        const badge = document.createElement('span');
-        badge.style.cssText = `background:${bgColor};color:${textColor};padding:4px 8px;border-radius:4px;margin:2px;display:inline-block;`;
-        badge.textContent = skill;
-        badgeBox.appendChild(badge);
-    });
+    badgeBox.style.marginTop = '7px';
+    if (skills.length === 0) {
+        const none = document.createElement('span');
+        none.style.cssText = 'color:#999;font-size:0.85rem;';
+        none.textContent = ' None';
+        badgeBox.appendChild(none);
+    } else {
+        skills.forEach(skill => {
+            const badge = document.createElement('span');
+            badge.style.cssText = `background:${bgColor};color:${textColor};padding:4px 9px;border-radius:4px;margin:2px;display:inline-block;font-size:0.85rem;`;
+            badge.textContent = skill;
+            badgeBox.appendChild(badge);
+        });
+    }
     wrapper.appendChild(badgeBox);
     return wrapper;
 }
@@ -335,10 +375,10 @@ function buildFailCard(result) {
     const card = document.createElement('div');
     card.style.cssText = 'background:#ffe8e8;margin:15px 0;padding:20px;border-radius:10px;border-left:4px solid #dc3545;';
     const h4 = document.createElement('h4');
-    h4.style.cssText = 'color:#dc3545;margin:0 0 10px 0;';
+    h4.style.cssText = 'color:#dc3545;margin:0 0 8px;';
     h4.textContent = result.filename;
     const err = document.createElement('div');
-    err.style.color = '#721c24';
+    err.style.cssText = 'color:#721c24;font-size:0.9rem;';
     err.textContent = `Error: ${result.error}`;
     card.appendChild(h4);
     card.appendChild(err);
@@ -375,25 +415,41 @@ function checkBiasRealTime(text) {
             const box = document.createElement('div');
 
             if (data.bias_detected) {
-                box.style.cssText = 'background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:8px;margin-top:10px;';
+                const levelColors = { low: '#856404', medium: '#cc5200', high: '#721c24' };
+                const levelBg = { low: '#fff3cd', medium: '#ffe5d0', high: '#f8d7da' };
+                const tc = levelColors[data.bias_level] || '#721c24';
+                const bg = levelBg[data.bias_level] || '#f8d7da';
+
+                box.style.cssText = `background:${bg};border:1px solid ${tc};padding:15px;border-radius:8px;margin-top:10px;`;
+
+                const header = document.createElement('div');
+                header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;';
                 const strong = document.createElement('strong');
-                strong.textContent = `Bias Detected (Score: ${data.bias_score})`;
-                box.appendChild(strong);
-                box.appendChild(document.createElement('br'));
-                box.appendChild(document.createTextNode('Biased words: '));
+                strong.textContent = `⚠ Bias Detected`;
+                const scoreBadge = document.createElement('span');
+                scoreBadge.style.cssText = `background:${tc};color:white;padding:2px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;`;
+                scoreBadge.textContent = `${data.bias_level.toUpperCase()} — Score: ${data.bias_score}`;
+                header.appendChild(strong);
+                header.appendChild(scoreBadge);
+                box.appendChild(header);
+
+                const wordLine = document.createElement('div');
+                wordLine.style.cssText = 'font-size:0.9rem;margin-top:4px;';
+                wordLine.textContent = 'Biased words: ';
                 data.bias_words.forEach(word => {
                     const badge = document.createElement('span');
-                    badge.style.cssText = 'background:#f39c12;color:white;padding:2px 6px;border-radius:4px;margin:2px;';
+                    badge.style.cssText = `background:${tc};color:white;padding:2px 7px;border-radius:4px;margin:2px;font-size:0.82rem;`;
                     badge.textContent = word;
-                    box.appendChild(badge);
+                    wordLine.appendChild(badge);
                 });
+                box.appendChild(wordLine);
             } else {
                 box.style.cssText = 'background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:8px;margin-top:10px;';
                 const strong = document.createElement('strong');
-                strong.textContent = 'No Bias Detected';
+                strong.textContent = '✅ No Bias Detected';
                 box.appendChild(strong);
                 box.appendChild(document.createElement('br'));
-                box.appendChild(document.createTextNode('This job description appears to use inclusive language.'));
+                box.appendChild(document.createTextNode('This job description appears to use inclusive and neutral language.'));
             }
 
             resultsDiv.appendChild(box);
