@@ -1,14 +1,31 @@
 #!/usr/bin/env python3
 """Flask app - AI Bias Detection in Hiring"""
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 import os
 import re
 import logging
+import csv
+import io
+import sqlite3
+import json
 import PyPDF2
 from collections import defaultdict
 import time
 from werkzeug.utils import secure_filename
+
+# Gemini LLM
+try:
+    import google.generativeai as genai
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        LLM_AVAILABLE = True
+    else:
+        LLM_AVAILABLE = False
+except Exception:
+    LLM_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,10 +33,57 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 UPLOAD_FOLDER = '/tmp/uploads' if os.environ.get('VERCEL') else 'uploads'
+DB_PATH = '/tmp/bias_hiring.db' if os.environ.get('VERCEL') else 'bias_hiring.db'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 MAX_UPLOAD_FILES = 20
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_role TEXT,
+                total_files INTEGER,
+                successful INTEGER,
+                average_match REAL,
+                bias_detected INTEGER,
+                bias_level TEXT,
+                severity_score INTEGER,
+                timestamp TEXT
+            );
+            CREATE TABLE IF NOT EXISTS candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                filename TEXT,
+                match_percentage REAL,
+                matching_skills TEXT,
+                missing_skills TEXT,
+                recommendation TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
+            CREATE TABLE IF NOT EXISTS bias_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                category TEXT,
+                words TEXT,
+                severity INTEGER,
+                timestamp TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
+        ''')
+
+init_db()
+
+# ── Job Roles ─────────────────────────────────────────────────────────────────
 
 job_roles = {
     "software_engineer": {
@@ -74,7 +138,8 @@ job_roles = {
     }
 }
 
-# Enhanced bias keywords with severity weights (1=low, 2=medium, 3=high)
+# ── Bias Keywords ─────────────────────────────────────────────────────────────
+
 BIAS_KEYWORDS = {
     "gender": {
         "words": {
@@ -131,7 +196,6 @@ BIAS_KEYWORDS = {
     }
 }
 
-# Ground-truth labeled test set for confusion matrix
 LABELED_TEST_DATA = [
     ("We need a strong aggressive rockstar programmer with competitive spirit", True),
     ("Looking for a young energetic digital native recent graduate", True),
@@ -150,27 +214,87 @@ LABELED_TEST_DATA = [
     ("Results-driven professional with strong analytical skills", False),
 ]
 
-# In-memory storage
-analytics_storage = {
-    'total_resumes': 0,
-    'bias_detections': [],
-    'processing_history': [],
-    'match_scores': [],
-    'skill_gaps': defaultdict(int)
-}
-confusion_data = {'predictions': []}
+# ── LLM Functions ─────────────────────────────────────────────────────────────
 
+def get_llm_bias_explanation(job_description, bias_details):
+    """Use Gemini to explain bias and rewrite the job description"""
+    if not LLM_AVAILABLE:
+        return None
+
+    biased_words = []
+    for b in bias_details:
+        biased_words.extend(b['words'])
+
+    prompt = f"""You are an expert in inclusive hiring practices and diversity & inclusion.
+
+A job description has been flagged for containing biased language. Your task:
+
+1. Briefly explain WHY each biased word/phrase is problematic (2-3 sentences total)
+2. Rewrite the ENTIRE job description using inclusive, neutral language
+
+ORIGINAL JOB DESCRIPTION:
+{job_description}
+
+FLAGGED BIASED WORDS: {', '.join(biased_words)}
+
+Respond in this exact JSON format:
+{{
+  "explanation": "Brief explanation of why these words create bias and who they might exclude...",
+  "rewritten_jd": "The full rewritten job description using inclusive language..."
+}}
+
+Keep the rewritten JD professional and retain all the technical requirements."""
+
+    try:
+        response = gemini_model.generate_content(prompt)
+        text = response.text.strip()
+        # Clean markdown code blocks if present
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        result = json.loads(text)
+        return result
+    except Exception as e:
+        logger.error("Gemini API error: %s", e)
+        return None
+
+
+def get_llm_candidate_feedback(resume_skills, missing_skills, job_title):
+    """Use Gemini to give personalized candidate improvement feedback"""
+    if not LLM_AVAILABLE or not missing_skills:
+        return None
+
+    prompt = f"""You are a career coach helping a candidate improve their profile for a {job_title} role.
+
+The candidate HAS these skills: {', '.join(resume_skills) if resume_skills else 'Not specified'}
+The candidate is MISSING these skills: {', '.join(missing_skills)}
+
+Give 3 specific, actionable recommendations to help them close the skill gap.
+Be concise and practical. Format as a JSON array:
+[
+  "Recommendation 1...",
+  "Recommendation 2...",
+  "Recommendation 3..."
+]"""
+
+    try:
+        response = gemini_model.generate_content(prompt)
+        text = response.text.strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        return json.loads(text)
+    except Exception as e:
+        logger.error("Gemini candidate feedback error: %s", e)
+        return None
+
+# ── Core Functions ────────────────────────────────────────────────────────────
 
 def analyze_job_description_bias(text):
-    """Enhanced bias detection with severity scoring and suggestions"""
     text_lower = text.lower()
     bias_report = defaultdict(list)
     severity_total = 0
-
     for category, data in BIAS_KEYWORDS.items():
         for keyword, severity in data['words'].items():
             if keyword in text_lower:
-                # Avoid false positives — skip if preceded by "not" or "avoid"
                 pattern = r'(?<!\bnot\s)(?<!\bavoid\s)' + re.escape(keyword)
                 if re.search(pattern, text_lower):
                     bias_report[category].append({
@@ -179,12 +303,10 @@ def analyze_job_description_bias(text):
                         'suggestion': data['neutral_alternatives'].get(keyword, 'Use neutral language')
                     })
                     severity_total += severity
-
     return bias_report, severity_total
 
 
 def get_bias_level(severity_score):
-    """Return bias level label based on severity score"""
     if severity_score == 0:
         return 'none', '#28a745'
     if severity_score <= 3:
@@ -195,7 +317,6 @@ def get_bias_level(severity_score):
 
 
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file"""
     try:
         with open(file_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
@@ -216,7 +337,6 @@ def extract_text_from_pdf(file_path):
 
 
 def anonymize_resume(text):
-    """Remove personal identifiers from resume"""
     text = re.sub(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', '[NAME]', text)
     text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', text)
     text = re.sub(r'(\+?\d[\d\s\-().]{7,}\d)', '[PHONE]', text)
@@ -227,7 +347,6 @@ def anonymize_resume(text):
 
 
 def extract_skills_from_text(text):
-    """Extract skills with broader coverage"""
     common_skills = [
         "python", "java", "javascript", "typescript", "html", "css", "sql", "nosql",
         "mongodb", "postgresql", "mysql", "react", "angular", "vue", "node", "express",
@@ -248,12 +367,10 @@ def extract_skills_from_text(text):
 
 
 def calculate_job_match(resume_skills, job_skills):
-    """Calculate match with bonus for extra skills"""
     if not job_skills:
         return {"match_percentage": 0, "matching_skills": [], "missing_skills": []}
     matching = list(set(resume_skills) & set(job_skills))
     base_pct = round((len(matching) / len(job_skills)) * 100, 2)
-    # Bonus: extra relevant skills beyond requirements (max +5%)
     extra = len(set(resume_skills) - set(job_skills))
     bonus = min(extra * 0.5, 5.0)
     match_percentage = min(round(base_pct + bonus, 2), 100.0)
@@ -275,7 +392,6 @@ def build_recommendation(match_percentage):
 
 
 def process_single_resume(file_path, filename, job_data):
-    """Process a single resume file"""
     try:
         resume_text = extract_text_from_pdf(file_path)
         if resume_text.startswith("Error"):
@@ -286,6 +402,13 @@ def process_single_resume(file_path, filename, job_data):
         match_result = calculate_job_match(resume_skills, job_data['required_skills'])
         match_percentage = match_result['match_percentage']
 
+        # LLM candidate feedback
+        llm_feedback = get_llm_candidate_feedback(
+            resume_skills,
+            match_result['missing_skills'],
+            job_data['title']
+        )
+
         return {
             'filename': filename,
             'status': 'success',
@@ -293,6 +416,7 @@ def process_single_resume(file_path, filename, job_data):
             'matching_skills': match_result['matching_skills'],
             'missing_skills': match_result['missing_skills'],
             'recommendation': build_recommendation(match_percentage),
+            'llm_feedback': llm_feedback,
             'anonymized_resume': anonymized_resume[:600] + '...' if len(anonymized_resume) > 600 else anonymized_resume
         }
     except Exception as e:
@@ -306,20 +430,11 @@ def process_single_resume(file_path, filename, job_data):
 
 
 def generate_confusion_matrix():
-    """Generate confusion matrix using labeled ground-truth test data"""
     preds = []
     for description, actual_label in LABELED_TEST_DATA:
         bias_report, severity = analyze_job_description_bias(description)
         predicted = severity > 0
-        preds.append({
-            'description': description,
-            'predicted': predicted,
-            'actual': actual_label
-        })
-
-    # Also include real upload predictions
-    for p in confusion_data['predictions']:
-        preds.append(p)
+        preds.append({'description': description, 'predicted': predicted, 'actual': actual_label})
 
     tp = sum(1 for p in preds if p['predicted'] and p['actual'])
     tn = sum(1 for p in preds if not p['predicted'] and not p['actual'])
@@ -388,46 +503,47 @@ def build_summary(pdf_files, results):
     }
 
 
-def update_analytics(job_data, results, bias_detected, bias_report, severity_total):
-    successful = [r for r in results if r['status'] == 'success']
-    analytics_storage['total_resumes'] += len(successful)
+def save_to_db(job_data, results, summary, bias_detected, bias_details, bias_level, severity_total):
+    """Save session and results to SQLite"""
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                '''INSERT INTO sessions (job_role, total_files, successful, average_match,
+                   bias_detected, bias_level, severity_score, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (job_data['title'], summary['total_files'], summary['successful'],
+                 summary['average_match'], int(bias_detected), bias_level,
+                 severity_total, time.strftime('%Y-%m-%d %H:%M:%S'))
+            )
+            session_id = cur.lastrowid
 
-    for r in successful:
-        analytics_storage['match_scores'].append(r['match_percentage'])
-        for skill in r.get('missing_skills', []):
-            analytics_storage['skill_gaps'][skill] += 1
+            for r in results:
+                if r['status'] == 'success':
+                    conn.execute(
+                        '''INSERT INTO candidates (session_id, filename, match_percentage,
+                           matching_skills, missing_skills, recommendation)
+                           VALUES (?, ?, ?, ?, ?, ?)''',
+                        (session_id, r['filename'], r['match_percentage'],
+                         json.dumps(r['matching_skills']), json.dumps(r['missing_skills']),
+                         r['recommendation'])
+                    )
 
-    if bias_detected:
-        analytics_storage['bias_detections'].append({
-            'categories': list(bias_report.keys()),
-            'severity': severity_total,
-            'job_role': job_data['title'],
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        })
+            for b in bias_details:
+                conn.execute(
+                    '''INSERT INTO bias_events (session_id, category, words, severity, timestamp)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (session_id, b['category'], json.dumps(b['words']),
+                     b['severity'], time.strftime('%Y-%m-%d %H:%M:%S'))
+                )
+    except Exception as e:
+        logger.error("DB save error: %s", e)
 
-    analytics_storage['processing_history'].append({
-        'job_role': job_data['title'],
-        'count': len(successful),
-        'avg_match': round(sum(r['match_percentage'] for r in successful) / len(successful), 1) if successful else 0,
-        'bias_detected': bias_detected,
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-    })
 
-    confusion_data['predictions'].append({
-        'description': job_data['description'],
-        'predicted': bias_detected,
-        'actual': bias_detected
-    })
-
-    analytics_storage['processing_history'] = analytics_storage['processing_history'][-100:]
-    analytics_storage['bias_detections'] = analytics_storage['bias_detections'][-100:]
-    analytics_storage['match_scores'] = analytics_storage['match_scores'][-500:]
-    confusion_data['predictions'] = confusion_data['predictions'][-100:]
-
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
-    return render_template('index.html', job_roles=job_roles)
+    return render_template('index.html', job_roles=job_roles, llm_available=LLM_AVAILABLE)
 
 
 @app.route('/confusion-matrix')
@@ -453,46 +569,108 @@ def check_bias_realtime():
 
 @app.route('/analytics')
 def analytics_dashboard():
-    bias_counts = defaultdict(int)
-    severity_sum = 0
-    for b in analytics_storage['bias_detections']:
-        for cat in b['categories']:
-            bias_counts[cat] += 1
-        severity_sum += b.get('severity', 0)
+    try:
+        with get_db() as conn:
+            total = conn.execute('SELECT COALESCE(SUM(successful),0) FROM sessions').fetchone()[0]
+            bias_incidents = conn.execute('SELECT COUNT(*) FROM sessions WHERE bias_detected=1').fetchone()[0]
+            avg_match = conn.execute('SELECT COALESCE(AVG(average_match),0) FROM sessions').fetchone()[0]
+            avg_severity = conn.execute('SELECT COALESCE(AVG(severity_score),0) FROM sessions WHERE bias_detected=1').fetchone()[0]
 
-    total = analytics_storage['total_resumes']
-    bias_incidents = len(analytics_storage['bias_detections'])
-    scores = analytics_storage['match_scores']
-    top_gaps = sorted(analytics_storage['skill_gaps'].items(), key=lambda x: x[1], reverse=True)[:8]
+            bias_cats = conn.execute('SELECT category, COUNT(*) as cnt FROM bias_events GROUP BY category ORDER BY cnt DESC').fetchall()
+            history = conn.execute('SELECT * FROM sessions ORDER BY id DESC LIMIT 10').fetchall()
 
-    # Match score distribution buckets
-    score_dist = {'0-25': 0, '26-50': 0, '51-75': 0, '76-100': 0}
-    for s in scores:
-        if s <= 25:
-            score_dist['0-25'] += 1
-        elif s <= 50:
-            score_dist['26-50'] += 1
-        elif s <= 75:
-            score_dist['51-75'] += 1
-        else:
-            score_dist['76-100'] += 1
+            scores_raw = conn.execute('SELECT match_percentage FROM candidates').fetchall()
+            scores = [r[0] for r in scores_raw]
 
-    analytics_data = {
-        'total_resumes_processed': total,
-        'bias_incidents_detected': bias_incidents,
-        'average_bias_severity': round(severity_sum / bias_incidents, 1) if bias_incidents else 0,
-        'average_match_score': round(sum(scores) / len(scores), 1) if scores else 0,
-        'clean_rate': round((total - bias_incidents) / total * 100, 1) if total > 0 else 0,
-        'top_bias_categories': [
-            {'category': k.replace('_', ' ').title(), 'count': v}
-            for k, v in sorted(bias_counts.items(), key=lambda x: x[1], reverse=True)
-        ],
-        'processing_history': analytics_storage['processing_history'][-10:],
-        'top_skill_gaps': [{'skill': k, 'count': v} for k, v in top_gaps],
-        'score_distribution': score_dist,
-        'recent_bias': analytics_storage['bias_detections'][-5:][::-1]
-    }
+            skill_gaps_raw = conn.execute(
+                'SELECT missing_skills FROM candidates'
+            ).fetchall()
+            skill_counts = defaultdict(int)
+            for row in skill_gaps_raw:
+                for skill in json.loads(row[0] or '[]'):
+                    skill_counts[skill] += 1
+            top_gaps = sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+
+            recent_bias = conn.execute(
+                'SELECT be.category, be.words, be.severity, be.timestamp, s.job_role '
+                'FROM bias_events be JOIN sessions s ON be.session_id=s.id '
+                'ORDER BY be.id DESC LIMIT 5'
+            ).fetchall()
+
+        score_dist = {'0-25': 0, '26-50': 0, '51-75': 0, '76-100': 0}
+        for s in scores:
+            if s <= 25:
+                score_dist['0-25'] += 1
+            elif s <= 50:
+                score_dist['26-50'] += 1
+            elif s <= 75:
+                score_dist['51-75'] += 1
+            else:
+                score_dist['76-100'] += 1
+
+        analytics_data = {
+            'total_resumes_processed': total,
+            'bias_incidents_detected': bias_incidents,
+            'average_bias_severity': round(avg_severity, 1),
+            'average_match_score': round(avg_match, 1),
+            'clean_rate': round((total - bias_incidents) / total * 100, 1) if total > 0 else 0,
+            'top_bias_categories': [{'category': r[0], 'count': r[1]} for r in bias_cats],
+            'processing_history': [dict(r) for r in history],
+            'top_skill_gaps': [{'skill': k, 'count': v} for k, v in top_gaps],
+            'score_distribution': score_dist,
+            'recent_bias': [dict(r) for r in recent_bias]
+        }
+    except Exception as e:
+        logger.error("Analytics error: %s", e)
+        analytics_data = {
+            'total_resumes_processed': 0, 'bias_incidents_detected': 0,
+            'average_bias_severity': 0, 'average_match_score': 0, 'clean_rate': 0,
+            'top_bias_categories': [], 'processing_history': [],
+            'top_skill_gaps': [], 'score_distribution': {'0-25': 0, '26-50': 0, '51-75': 0, '76-100': 0},
+            'recent_bias': []
+        }
+
     return render_template('analytics.html', data=analytics_data)
+
+
+@app.route('/export-csv')
+def export_csv():
+    """Export all candidate results as CSV"""
+    try:
+        with get_db() as conn:
+            rows = conn.execute('''
+                SELECT s.job_role, s.timestamp, c.filename, c.match_percentage,
+                       c.matching_skills, c.missing_skills, c.recommendation,
+                       s.bias_detected, s.bias_level, s.severity_score
+                FROM candidates c
+                JOIN sessions s ON c.session_id = s.id
+                ORDER BY s.id DESC, c.match_percentage DESC
+            ''').fetchall()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Job Role', 'Session Date', 'Resume File', 'Match %',
+                         'Matching Skills', 'Missing Skills', 'Recommendation',
+                         'Bias Detected', 'Bias Level', 'Severity Score'])
+
+        for row in rows:
+            matching = ', '.join(json.loads(row[4] or '[]'))
+            missing = ', '.join(json.loads(row[5] or '[]'))
+            writer.writerow([
+                row[0], row[1], row[2], row[3],
+                matching, missing, row[6],
+                'Yes' if row[7] else 'No', row[8], row[9]
+            ])
+
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=bias_report_{time.strftime("%Y%m%d_%H%M%S")}.csv'}
+        )
+    except Exception as e:
+        logger.error("CSV export error: %s", e)
+        return jsonify({'error': 'Export failed'}), 500
 
 
 @app.route('/upload', methods=['POST'])
@@ -526,7 +704,14 @@ def upload_resume():
         bias_report, severity_total = analyze_job_description_bias(job_data['description'])
         bias_detected, bias_details, bias_level, bias_color = build_bias_details(bias_report, severity_total)
         summary = build_summary(pdf_files, results)
-        update_analytics(job_data, results, bias_detected, bias_report, severity_total)
+
+        # LLM bias explanation + rewrite
+        llm_bias = None
+        if bias_detected:
+            llm_bias = get_llm_bias_explanation(job_data['description'], bias_details)
+
+        # Save to database
+        save_to_db(job_data, results, summary, bias_detected, bias_details, bias_level, severity_total)
 
         return jsonify({
             'results': results,
@@ -536,7 +721,9 @@ def upload_resume():
             'bias_level': bias_level,
             'bias_color': bias_color,
             'severity_score': severity_total,
-            'job_title': job_data['title']
+            'job_title': job_data['title'],
+            'llm_bias': llm_bias,
+            'llm_available': LLM_AVAILABLE
         })
     except Exception as e:
         logger.error("Upload error: %s", e)

@@ -55,7 +55,17 @@
         <div style="text-align: center; margin: 40px 0;">
             <a href="/confusion-matrix" target="_blank" class="performance-btn">📊 View System Performance</a>
             <a href="/analytics" target="_blank" class="performance-btn">📈 Analytics Dashboard</a>
+            <a href="/export-csv" class="performance-btn" style="background:linear-gradient(135deg,#27ae60,#2ecc71);">⬇ Export CSV</a>
         </div>
+        {% if llm_available %}
+        <div style="text-align:center;margin-bottom:20px;">
+            <span style="background:#e8f5e8;color:#27ae60;padding:6px 16px;border-radius:20px;font-size:0.85rem;font-weight:600;">🤖 Gemini AI Active — Smart bias explanations enabled</span>
+        </div>
+        {% else %}
+        <div style="text-align:center;margin-bottom:20px;">
+            <span style="background:#f8f9fa;color:#999;padding:6px 16px;border-radius:20px;font-size:0.85rem;">🤖 Gemini AI not configured — Add GEMINI_API_KEY in Vercel env vars</span>
+        </div>
+        {% endif %}
     </div>
     
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

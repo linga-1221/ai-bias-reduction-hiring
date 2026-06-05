@@ -126,7 +126,7 @@ function buildResultsDOM(data) {
         container.appendChild(buildTopCandidatesSection(data.summary.top_candidates));
     }
 
-    container.appendChild(buildBiasSection(data.bias_detected, data.bias_details, data.bias_level, data.severity_score));
+    container.appendChild(buildBiasSection(data.bias_detected, data.bias_details, data.bias_level, data.severity_score, data.llm_bias));
     container.appendChild(buildDetailedResults(data.results));
 
     return container;
@@ -205,7 +205,7 @@ function buildTopCandidatesSection(candidates) {
     return section;
 }
 
-function buildBiasSection(biasDetected, biasDetails, biasLevel, severityScore) {
+function buildBiasSection(biasDetected, biasDetails, biasLevel, severityScore, llmBias) {
     const section = document.createElement('div');
     section.className = 'section';
     const h3 = document.createElement('h3');
@@ -265,6 +265,34 @@ function buildBiasSection(biasDetected, biasDetails, biasLevel, severityScore) {
             box.appendChild(row);
         });
 
+        // LLM Explanation + Rewritten JD
+        if (llmBias) {
+            const llmBox = document.createElement('div');
+            llmBox.style.cssText = 'margin-top:16px;background:#f0f4ff;border-radius:10px;padding:18px;border-left:4px solid #6c63ff;';
+            const llmTitle = document.createElement('h4');
+            llmTitle.style.cssText = 'margin:0 0 10px;color:#6c63ff;';
+            llmTitle.textContent = '🤖 Gemini AI Analysis';
+            llmBox.appendChild(llmTitle);
+            if (llmBias.explanation) {
+                const expLabel = document.createElement('strong');
+                expLabel.textContent = 'Why this is biased:';
+                const expText = document.createElement('p');
+                expText.style.cssText = 'color:#444;font-size:0.92rem;margin:6px 0 14px;';
+                expText.textContent = llmBias.explanation;
+                llmBox.appendChild(expLabel);
+                llmBox.appendChild(expText);
+            }
+            if (llmBias.rewritten_jd) {
+                const rwLabel = document.createElement('strong');
+                rwLabel.textContent = '✏️ AI-Rewritten (Bias-Free) Version:';
+                const rwBox = document.createElement('div');
+                rwBox.style.cssText = 'background:white;border-radius:8px;padding:14px;margin-top:8px;border:1px solid #dde;font-size:0.9rem;color:#333;white-space:pre-wrap;';
+                rwBox.textContent = llmBias.rewritten_jd;
+                llmBox.appendChild(rwLabel);
+                llmBox.appendChild(rwBox);
+            }
+            section.appendChild(llmBox);
+        }
         section.appendChild(box);
     } else {
         const box = document.createElement('div');
@@ -326,6 +354,26 @@ function buildSuccessCard(result) {
 
     card.appendChild(buildSkillBadges('✅ Matching Skills:', result.matching_skills, '#e7f3ff', '#0066cc'));
     card.appendChild(buildSkillBadges('❌ Missing Skills:', result.missing_skills, '#ffe8e8', '#dc3545'));
+
+    // LLM candidate feedback
+    if (result.llm_feedback && result.llm_feedback.length > 0) {
+        const fbBox = document.createElement('div');
+        fbBox.style.cssText = 'margin:14px 0;padding:14px;background:#f0f4ff;border-radius:8px;border-left:3px solid #6c63ff;';
+        const fbTitle = document.createElement('strong');
+        fbTitle.style.color = '#6c63ff';
+        fbTitle.textContent = '🤖 AI Career Recommendations:';
+        fbBox.appendChild(fbTitle);
+        const ul = document.createElement('ul');
+        ul.style.cssText = 'margin:8px 0 0 18px;padding:0;font-size:0.88rem;color:#444;';
+        result.llm_feedback.forEach(tip => {
+            const li = document.createElement('li');
+            li.style.marginBottom = '5px';
+            li.textContent = tip;
+            ul.appendChild(li);
+        });
+        fbBox.appendChild(ul);
+        card.appendChild(fbBox);
+    }
 
     const details = document.createElement('details');
     details.style.marginTop = '14px';
