@@ -9,10 +9,6 @@
         <h1>🤖 AI Resume Bias Detector</h1>
         <p class="subtitle">Advanced AI-powered resume screening with bias detection and job matching analysis</p>
         
-        <div style="text-align: center; margin: 20px 0;">
-            <a href="/confusion-matrix" target="_blank" class="performance-btn">📊 View System Performance</a>
-        </div>
-        
         <form id="uploadForm" enctype="multipart/form-data">
             <div class="form-group">
                 <label for="jobRole">🎯 Select Target Job Role:</label>
@@ -25,25 +21,40 @@
             </div>
             
             <div class="form-group">
-                <label for="resumeFile">📄 Upload Resume (PDF format):</label>
+                <label for="resumeFile">📄 Upload Resumes (PDF format - Max 20 files):</label>
                 <div class="file-input-wrapper">
-                    <input type="file" id="resumeFile" accept=".pdf" required>
+                    <input type="file" id="resumeFile" accept=".pdf" multiple required>
                     <label for="resumeFile" class="file-input-label" id="fileLabel">
-                        📎 Click to select PDF file or drag & drop here
+                        📎 Click to select PDF files or drag & drop here (Max 20 files)
                     </label>
                 </div>
+                <div id="fileList" style="margin-top: 10px;"></div>
             </div>
             
-            <button type="submit">🚀 Analyze Resume & Detect Bias</button>
+            <button type="submit">🚀 Analyze Resumes & Detect Bias</button>
         </form>
+        
+        <!-- Real-time Bias Checker -->
+        <div class="demo-section" style="margin: 30px 0;">
+            <h3>🔍 Real-Time Job Description Bias Checker</h3>
+            <textarea id="job-description-input" placeholder="Type or paste your job description here to check for bias in real-time..." 
+                     style="width: 100%; height: 150px; padding: 15px; border: 2px solid #e1e8ed; border-radius: 10px; font-size: 14px;"></textarea>
+            <div id="bias-results" style="margin-top: 15px;"></div>
+        </div>
         
         <div id="loading" class="loading" style="display:none;">
             <div class="spinner"></div>
-            <p>🔄 Analyzing resume and detecting bias patterns...</p>
-            <p style="font-size: 0.9em; color: #7f8c8d;">This may take a few moments</p>
+            <p>🔄 Processing multiple resumes and detecting bias patterns...</p>
+            <p style="font-size: 0.9em; color: #7f8c8d;">This may take a few moments for multiple files</p>
+            <div id="progress-info" style="margin-top: 10px;"></div>
         </div>
         
         <div id="result" class="result" style="display:none;"></div>
+        
+        <div style="text-align: center; margin: 40px 0;">
+            <a href="/confusion-matrix" target="_blank" class="performance-btn">📊 View System Performance</a>
+            <a href="/analytics" target="_blank" class="performance-btn">📈 Analytics Dashboard</a>
+        </div>
     </div>
     
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

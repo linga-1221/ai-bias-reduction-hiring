@@ -1,0 +1,79 @@
+# Test Examples for Bias Detection
+
+## Copy and paste these into the "Real-Time Job Description Bias Checker" to see how it works:
+
+### Example 1: HIGHLY BIASED (Multiple Categories)
+We are looking for a young, energetic rockstar developer who is strong, aggressive, and competitive. The ideal candidate should be a ninja programmer with dominant leadership skills.
+
+Expected Detection:
+- Gender Bias: strong, aggressive, competitive, dominant
+- Age Bias: young, energetic
+- Personality Bias: rockstar, ninja
+
+
+### Example 2: GENDER BIASED (Male-oriented)
+Seeking an assertive software engineer with competitive spirit and aggressive problem-solving abilities. Must be strong under pressure.
+
+Expected Detection:
+- Gender Bias: assertive, competitive, aggressive, strong
+
+
+### Example 3: AGE BIASED (Youth-oriented)
+Looking for a fresh, energetic developer who is a digital native with recent graduate enthusiasm.
+
+Expected Detection:
+- Age Bias: fresh, energetic, digital native, recent graduate
+
+
+### Example 4: AGE BIASED (Senior-oriented)
+We need a mature, seasoned, experienced professional with years of expertise.
+
+Expected Detection:
+- Age Bias: mature, seasoned, experienced
+
+
+### Example 5: PERSONALITY BIASED
+Join our fast-paced team! We need a guru who is a rockstar ninja at coding.
+
+Expected Detection:
+- Personality Bias: fast-paced, guru, rockstar, ninja
+
+
+### Example 6: NO BIAS (Neutral Language)
+We are seeking a skilled, qualified software developer with problem-solving abilities and technical expertise. The ideal candidate will be proficient in programming and dedicated to quality work.
+
+Expected Detection:
+- ✅ No Bias Detected
+
+
+### Example 7: MIXED BIAS
+Looking for a collaborative team player who is nurturing and supportive in mentoring junior developers.
+
+Expected Detection:
+- Gender Bias: collaborative, nurturing, supportive (female-biased)
+
+
+### Example 8: SUBTLE BIAS
+We want someone who is strong in algorithms, competitive in the market, and a rockstar at optimization.
+
+Expected Detection:
+- Gender Bias: strong, competitive
+- Personality Bias: rockstar
+
+
+## How to Use:
+1. Open http://127.0.0.1:5003 in your browser
+2. Scroll to "Real-Time Job Description Bias Checker"
+3. Copy any example above
+4. Paste into the text area
+5. Watch the bias detection appear in real-time!
+
+## Understanding the Results:
+
+🟡 BIAS DETECTED = System found problematic words
+✅ NO BIAS DETECTED = Language is neutral and inclusive
+
+The system shows:
+- Bias Score: Number of unique biased words found
+- Biased Words: Highlighted in orange badges
+- Category: Gender, Age, or Personality bias
