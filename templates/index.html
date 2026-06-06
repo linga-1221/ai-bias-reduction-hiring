@@ -1,73 +1,119 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI Resume Bias Detector & Job Matcher</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Bias Detection in Hiring</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <h1>🤖 AI Resume Bias Detector</h1>
-        <p class="subtitle">Advanced AI-powered resume screening with bias detection and job matching analysis</p>
-        
-        <form id="uploadForm" enctype="multipart/form-data">
-            <div class="form-group">
-                <label for="jobRole">🎯 Select Target Job Role:</label>
-                <select id="jobRole" required>
-                    <option value="">Choose a job role...</option>
-                    {% for job_id, job_data in job_roles.items() %}
-                    <option value="{{ job_id }}">{{ job_data.title }}</option>
-                    {% endfor %}
-                </select>
+<div class="page-wrapper">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <div class="logo-icon">🤖</div>
+            <span>FairHire AI<small>Bias Detection System</small></span>
+        </div>
+
+        <span class="nav-section-label">Main</span>
+        <a class="nav-item active" href="/">
+            <span class="nav-icon">🏠</span> Dashboard
+        </a>
+
+        <span class="nav-section-label">Reports</span>
+        <a class="nav-item" href="/analytics" target="_blank">
+            <span class="nav-icon">📊</span> Analytics
+        </a>
+        <a class="nav-item" href="/confusion-matrix" target="_blank">
+            <span class="nav-icon">🎯</span> Model Performance
+        </a>
+        <a class="nav-item" href="/export-csv">
+            <span class="nav-icon">⬇</span> Export CSV
+        </a>
+
+        <div class="sidebar-footer">
+            {% if llm_available %}
+            <div class="llm-badge active">
+                <span>●</span> Gemini AI Active
             </div>
-            
-            <div class="form-group">
-                <label for="resumeFile">📄 Upload Resumes (PDF format - Max 20 files):</label>
-                <div class="file-input-wrapper">
-                    <input type="file" id="resumeFile" accept=".pdf" multiple required>
-                    <label for="resumeFile" class="file-input-label" id="fileLabel">
-                        📎 Click to select PDF files or drag & drop here (Max 20 files)
-                    </label>
+            {% else %}
+            <div class="llm-badge inactive">
+                <span>○</span> Gemini AI — Not Configured
+            </div>
+            {% endif %}
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content">
+        <div class="page-header">
+            <h1>Resume Analysis & Bias Detection</h1>
+            <p>Upload resumes and detect unconscious bias in job descriptions using AI</p>
+        </div>
+
+        <!-- Upload Form -->
+        <div class="card">
+            <div class="card-title">📄 New Analysis Session</div>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="form-row">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Job Role</label>
+                        <select id="jobRole" required>
+                            <option value="">Select a job role...</option>
+                            {% for job_id, job_data in job_roles.items() %}
+                            <option value="{{ job_id }}">{{ job_data.title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div style="display:flex;align-items:flex-end;">
+                        <button type="submit" class="btn-primary">
+                            🚀 Analyze Resumes
+                        </button>
+                    </div>
                 </div>
-                <div id="fileList" style="margin-top: 10px;"></div>
-            </div>
-            
-            <button type="submit">🚀 Analyze Resumes & Detect Bias</button>
-            <div id="form-error" style="display:none;color:#dc3545;background:#ffe8e8;padding:10px;border-radius:8px;margin-top:10px;"></div>
-        </form>
-        
+
+                <div class="form-group" style="margin-top:20px;">
+                    <label class="form-label">Upload Resumes (PDF — Max 20 files)</label>
+                    <div class="file-drop-zone" id="dropZone">
+                        <input type="file" id="resumeFile" accept=".pdf" multiple required>
+                        <div class="drop-icon">📂</div>
+                        <div class="drop-title" id="fileLabel">Drag & drop PDF files here or click to browse</div>
+                        <div class="drop-sub">Supports multiple files up to 20 PDFs</div>
+                    </div>
+                    <div id="fileList"></div>
+                </div>
+
+                <div class="form-error" id="form-error"></div>
+            </form>
+        </div>
+
         <!-- Real-time Bias Checker -->
-        <div class="demo-section" style="margin: 30px 0;">
-            <h3>🔍 Real-Time Job Description Bias Checker</h3>
-            <textarea id="job-description-input" placeholder="Type or paste your job description here to check for bias in real-time..." 
-                     style="width: 100%; height: 150px; padding: 15px; border: 2px solid #e1e8ed; border-radius: 10px; font-size: 14px;"></textarea>
-            <div id="bias-results" style="margin-top: 15px;"></div>
+        <div class="card bias-checker-card">
+            <div class="card-title">🔍 Real-Time Job Description Bias Checker</div>
+            <textarea id="job-description-input" placeholder="Paste or type a job description here to instantly check for bias..."></textarea>
+            <div id="bias-results" style="margin-top:12px;"></div>
         </div>
-        
-        <div id="loading" class="loading" style="display:none;">
+
+        <!-- Loading -->
+        <div id="loading" class="loading">
             <div class="spinner"></div>
-            <p>🔄 Processing multiple resumes and detecting bias patterns...</p>
-            <p style="font-size: 0.9em; color: #7f8c8d;">This may take a few moments for multiple files</p>
-            <div id="progress-info" style="margin-top: 10px;"></div>
+            <p><strong>Analyzing resumes...</strong></p>
+            <p id="progress-info" style="margin-top:6px;"></p>
         </div>
-        
-        <div id="result" class="result" style="display:none;"></div>
-        
-        <div style="text-align: center; margin: 40px 0;">
-            <a href="/confusion-matrix" target="_blank" class="performance-btn">📊 View System Performance</a>
-            <a href="/analytics" target="_blank" class="performance-btn">📈 Analytics Dashboard</a>
-            <a href="/export-csv" class="performance-btn" style="background:linear-gradient(135deg,#27ae60,#2ecc71);">⬇ Export CSV</a>
+
+        <!-- Results -->
+        <div id="result" class="result"></div>
+
+        <!-- Bottom Nav -->
+        <div class="bottom-nav">
+            <a href="/analytics" target="_blank" class="nav-btn nav-btn-purple">📊 Analytics Dashboard</a>
+            <a href="/confusion-matrix" target="_blank" class="nav-btn nav-btn-teal">🎯 Model Performance</a>
+            <a href="/export-csv" class="nav-btn nav-btn-green">⬇ Export CSV</a>
         </div>
-        {% if llm_available %}
-        <div style="text-align:center;margin-bottom:20px;">
-            <span style="background:#e8f5e8;color:#27ae60;padding:6px 16px;border-radius:20px;font-size:0.85rem;font-weight:600;">🤖 Gemini AI Active — Smart bias explanations enabled</span>
-        </div>
-        {% else %}
-        <div style="text-align:center;margin-bottom:20px;">
-            <span style="background:#f8f9fa;color:#999;padding:6px 16px;border-radius:20px;font-size:0.85rem;">🤖 Gemini AI not configured — Add GEMINI_API_KEY in Vercel env vars</span>
-        </div>
-        {% endif %}
-    </div>
-    
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
